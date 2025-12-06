@@ -1,4 +1,9 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
+
+class Afspraak(BaseModel):
+    titel:str
+    datum:str
 
 app = FastAPI()
 data=[
@@ -20,3 +25,7 @@ data=[
 @app.get("/")
 async def root():
     return data
+@app.post("/")
+async def create_item(afspraak:Afspraak):
+    data.append(afspraak)
+    return afspraak
