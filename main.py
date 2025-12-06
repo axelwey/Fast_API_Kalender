@@ -1,42 +1,54 @@
 from fastapi import FastAPI
-from pydantic import BaseModel, AfterValidator
-from typing import Optional, Annotated
-import sqlite3
+from sqlmodel import SQLModel, Field, Session, select, create_engine
+from typing import Optional
 
-conn=sqlite3.connect("afspraken.db")
-conn.row_factory = sqlite3.Row   
-cursor=conn.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS afspraken (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    titel TEXT NOT NULL,
-    datum TEXT NOT NULL
-)
-""")
-conn.commit()
-def lang_genoeg(titel:str):
-    assert len(titel)>3 , "titel te kort"
-    return titel
-Titel=Annotated[str,AfterValidator(lang_genoeg)]
-class Afspraak(BaseModel):
-    id:Optional[int]=None
-    titel:Titel
-    datum:str
+# ------------------------------------
+# SQLModel ORM Klasse
+# ------------------------------------
+class Appointment(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    titel: str
+    datum: str
 
+# ------------------------------------
+# Database
+# ------------------------------------
+engine = create_engine("sqlite:///afspraken.db", echo=True)
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+# ------------------------------------
+# FastAPI
+# ------------------------------------
 app = FastAPI()
 
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
 
-@app.get("/")
-async def root():
-    afspraken=cursor.execute("select * from afspraken").fetchall()
-    return [dict(row) for row in afspraken]
-@app.post("/")
-async def create_item(afspraak:Afspraak):
-    cursor.execute("insert into afspraken(titel,datum) values (?,?)",[afspraak.titel,afspraak.datum])
-    conn.commit()
-    return afspraak
-@app.delete("/")
-async def delete_item(id_item:int):
-    cursor.execute("DELETE FROM afspraken WHERE id = ?", (id_item,))
-    conn.commit()
-    return "verwijdert"
+@app.get("/appointments")
+def get_appointments():
+    with Session(engine) as session:
+        statement = select(Appointment)
+        results = session.exec(statement).all()
+        return results
+
+@app.post("/appointments")
+def create_appointment(afspraak: Appointment):
+    with Session(engine) as session:
+        session.add(afspraak)
+        session.commit()
+        session.refresh(afspraak)
+        return afspraak
+
+@app.delete("/appointments/{appointment_id}")
+def delete_appointment(appointment_id: int):
+    with Session(engine) as session:
+        appointment = session.get(Appointment, appointment_id)
+        if not appointment:
+            return {"error": "Appointment not found"}
+
+        session.delete(appointment)
+        session.commit()
+        return {"message": "deleted"}
